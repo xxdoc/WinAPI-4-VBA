@@ -13,14 +13,14 @@ type INPUT_     '   typedef struct tagINPUT ' {
 end type ' }
 
 
-private type IMAGE_DATA_DIRECTORY ' {
+private type IMAGE_DATA_DIRECTORY ' WinNT.h {
     RVA  as long ' Relative VA
     Size as long
 end type ' }
 
 private const IMAGE_NUMBEROF_DIRECTORY_ENTRIES = 16
 
-type IMAGE_EXPORT_DIRECTORY_TABLE ' {
+type IMAGE_EXPORT_DIRECTORY_TABLE ' WinNT.h {
   Characteristics         as  long
   TimeDateStamp           as  long
   MajorVersion            as  integer
@@ -29,13 +29,16 @@ type IMAGE_EXPORT_DIRECTORY_TABLE ' {
   Base                    as  long
   NumberOfFunctions       as  long
   NumberOfNames           as  long
-  pAddressOfFunctions     as  long
-  pAddressOfNames         as  long
-  pAddressOfNameOrdinals  as  long
+  AddressOfFunctions      as  long ' Relative virtual address (RVA) from base of image. Points to an array of RVAs of functions/symbols in the module
+  AddressOfNames          as  long ' Relative virtual address (RVA) from base of image
+  AddressOfNameOrdinals   as  long ' Relative virtual address (RVA) from base of image
 end type ' }
 
-type IMAGE_OPTIONAL_HEADER ' {
- ' Standard fields.
+type IMAGE_OPTIONAL_HEADER32 ' WinNT.h {
+'
+'  2019-01-24: Renamed from IMAGE_OPTIONAL_HEADER
+'
+ ' Standard fields:
    Magic                                                 as  integer
    MajorLinkerVersion                                    as  byte
    MinorLinkerVersion                                    as  byte
@@ -45,7 +48,8 @@ type IMAGE_OPTIONAL_HEADER ' {
    AddressOfEntryPoint                                   as  long
    BaseOfCode                                            as  long
    BaseOfData                                            as  long
- ' NT additional fields.
+
+ ' NT additional fields:
    ImageBase                                             as  long
    SectionAlignment                                      as  long
    FileAlignment                                         as  long
@@ -71,7 +75,10 @@ type IMAGE_OPTIONAL_HEADER ' {
    DataDirectory(0 to IMAGE_NUMBEROF_DIRECTORY_ENTRIES)  as  IMAGE_DATA_DIRECTORY ' 17*8 + 96 = 232
 end type ' }
 
-type IMAGE_COFF_HEADER ' { COFF file header
+type IMAGE_FILE_HEADER ' { WinNT.h / COFF file header
+'
+'  2019-01-24: Renamed from IMAGE_COFF_HEADER
+'
    Machine               as  integer
    NumberOfSections      as  integer
    TimeDateStamp         as  long
@@ -81,13 +88,15 @@ type IMAGE_COFF_HEADER ' { COFF file header
    Characteristics       as  integer
 end type ' }
 
-type IMAGE_PE_FILE_HEADER ' {
+type IMAGE_NT_HEADERS32 ' WinNT.h {
   '
-  ' Same structure as IMAGE_NT_HEADER?
+  ' 2019-01-24: renamed from  »IMAGE_PE_FILE_HEADER«.
+  '
+  ' Compare with IMAGE_NT_HEADERS64, also defined in WinNT.h
   '
     Signature      as long
-    FileHeader     as IMAGE_COFF_HEADER
-    OptionalHeader as IMAGE_OPTIONAL_HEADER
+    FileHeader     as IMAGE_FILE_HEADER
+    OptionalHeader as IMAGE_OPTIONAL_HEADER32 '  or IMAGE_OPTIONAL_HEADER64
 end type ' }
 
 type WNDCLASSEX ' {
@@ -148,19 +157,32 @@ type LIST_ENTRY ' { Used by LOADED_IMAGE
   Blink as long
 end type ' }
 
-type LOADED_IMAGE ' 48 bytes (46 bytes packed) ' { Used with MapAndLoad
-  ModuleName       as long
-  hFile            as long
-  MappedAddress    as long ' Base address of mapped file
-  pFileHeader      as long ' Pointer to IMAGE_PE_FILE_HEADER
-  pLstRvaSection   as long ' Pointer to first COFF section header (section table)??
-  NumberOfSections as long
-  pSections        as long ' Pointer to first COFF section header (section table)??
-  Characteristics  as long ' Image characteristics value
-  fSystemImage     as Byte
-  fDOSImage        as Byte
-  Links            as LIST_ENTRY ' 2 longs
-  SizeOfImage      as long
+'
+'    LOADED_IMAGE
+'      Is defined in both ImageHlp.h and DbgHelp.h
+'
+type LOADED_IMAGE ' 48 bytes (46 bytes packed ) ' { Used with MapAndLoad
+  ModuleName         as long
+  hFile              as long
+  MappedAddress      as long ' Base address of mapped file
+  FileHeader         as long ' Pointer to IMAGE_NT_HEADERS32 ' (Compare with IMAGE_NT_HEADERS64) -- Note: the pointed to IMAGE_NT_HEADERS32 also has a member named FileHeader.
+  LastRvaSection     as long ' Pointer to first COFF section header (section table)? 2019-01-24: Renamed from pLstRvaSection 
+  NumberOfSections   as long
+  Sections           as long ' Pointer to IMAGE_SECTION_HEADER (First COFF section header (section table)??)
+  Characteristics    as long ' Image characteristics value
+  fSystemImage       as byte ' bool
+  fDOSImage          as byte ' bool
+'
+' At least in C, the compiler pads the following two (new) members
+' with the previous two bytes into 4 byte so that in C, adding
+' or omitting them should not change anything.
+'
+' fReadOnly          as byte ' bool
+' Version            as byte ' UCHAR
+'
+' ----------------------------------------------------------
+  Links              as LIST_ENTRY ' 2 longs
+  SizeOfImage        as long
 end type ' }
 
 public type MODULEINFO ' {
@@ -276,6 +298,7 @@ public const HSHELL_WINDOWCREATED    = 1  ' Top-level unowned window has been cr
 '   These can be used for the parameter hWndInsertAfter in SetWindowPos()
 '
 public const HWND_BOTTOM    =  1
+public const HWND_BROADCAST = &HFFFF&
 public const HWND_NOTOPMOST = -2
 public const HWND_TOP       =  0
 public const HWND_TOPMOST   = -1
@@ -325,6 +348,11 @@ public const SM_CXSCREEN        =  0 ' Width of primary monitor
 public const SM_CYSCREEN        =  1 ' Height of primary monitor
 public const SM_SLOWMACHINE     = 73 ' Non zero if slow (low-end) processor
 ' }
+
+public const SMTO_ABORTIFHUNG        = &H2&
+
+public const SPI_SETNONCLIENTMETRICS = &H2A&
+
 ' SW_* constants for ShowWindow() {
 public const SW_FORCEMINIMIZE   = 11 ' Minimizes a window.
 public const SW_HIDE            =  0 ' Hides the window and activates another window.
@@ -496,21 +524,22 @@ public const VK_NONAME               = &h0fc ' }
 '  WH_* constants used for SetWindowsHookEx {
 '
 public const WH_CBT         =  5
-public const WH_KEYBOARD_LL = 13 ' Low level keyboard events
+public const WH_KEYBOARD_LL = 13 ' Low level keyboard events (compare with WH_KEYBOARD)
 public const WH_SHELL       = 10 ' Notification of shell events, such as creation of top level windows.
 ' }
 ' { WM_*: Window messsages
-public const WM_CHAR        = &h0102
-public const WM_CLOSE       = &H0010
-public const Wm_CREATE      = &H0001
-public const WM_DESTROY     = &H0002
-public const WM_KEYDOWN     = &h0100
-public const WM_KEYUP       = &h0101
-public const WM_PAINT       = &H000F
-public const WM_SETTEXT     = &h000C
-public const WM_SIZE        = &h0005
-public const WM_SYSKEYDOWN  = &h0104
-public const WM_SYSKEYUP    = &h0105
+public const WM_CHAR          = &h0102
+public const WM_CLOSE         = &H0010
+public const Wm_CREATE        = &H0001
+public const WM_DESTROY       = &H0002
+public const WM_KEYDOWN       = &h0100
+public const WM_KEYUP         = &h0101
+public const WM_PAINT         = &H000F
+public const WM_SETTEXT       = &h000C
+public const WM_SETTINGCHANGE = &H001A
+public const WM_SIZE          = &h0005
+public const WM_SYSKEYDOWN    = &h0104
+public const WM_SYSKEYUP      = &h0105
 ' }
 
 ' { WS_* / Window styles
@@ -820,6 +849,11 @@ public const BLACK_BRUSH = 4
          byVal module         as long  , _
          byVal procName       as string) as long
 
+  ' GetProcessHeap {
+  ' - See also HeapAlloc()
+    declare ptrSafe function GetProcessHeap lib "kernel32" () As longPtr
+  ' }
+
     ' { GetStockObject
     '   See also predefined brushes (such as WHITE_BRUSH, BLACK_BRUSH etc.)
     declare ptrSafe function GetStockObject lib "gdi32"                                   ( _
@@ -880,6 +914,21 @@ public const BLACK_BRUSH = 4
     declare function GlobalUnlock        lib "kernel32"                                  ( _
          byVal hMem           as long   ) as long
   ' }
+
+' }
+' { H
+
+  ' HeapAlloc {
+  '
+  ' hHeap: Use GetProcessHeap() or HeapCreate
+  '
+  ' - Compare with -> VirtualAlloc
+  '
+    declare ptrSafe function HeapAlloc lib "kernel32"                                     ( _
+         byVal hHeap          as longPtr, _
+         byVal dwFlags        as long   , _
+         byVal dwBytes        as longPtr) as longPtr
+   ' }
 
 ' }
 ' { I
@@ -1021,6 +1070,28 @@ public const BLACK_BRUSH = 4
          byVal wParam as long, _
                lParam as any) as long
 
+    ' SendMessageW {
+    '
+    '   The wide-character variant of SendMessage is needed if
+    '   a string needs to be passed with lParam. See for example
+    '      https://renenyffenegger.ch/notes/Windows/registry/environment-variables
+    '
+    declare function SendMessageW        lib "user32"       alias "SendMessageW"      ( _
+         byVal hwnd   as long, _
+         byVal wMsg   as long, _
+         byVal wParam as long, _
+               lParam as any) as long
+    ' }
+
+    declare function SendMessageTimeoutW lib "user32"       alias "SendMessageTimeoutW" ( _
+         byVal hwnd     as long, _
+         ByVal msg      as long, _
+         byVal wParam   as long, _
+         byVal lParam   as long, _
+         byVal fuFlags  as long, _
+         byVal uTimeout as long, _
+         lpdwResult     as long) as long
+
     declare function SetClipboardData    lib "User32"                                 ( _
          byVal wFormat as long, _
          byVal hMem    as long) as long
@@ -1113,6 +1184,7 @@ public const BLACK_BRUSH = 4
   ' - Use one of the MEM_* constants for flAllocationType
   ' - Use PAGE_* for flProtect
   ' - See also VirtualFree
+  ' - Compare with HeapAlloc
     declare ptrSafe function VirtualAlloc lib "kernel32"                              ( _
          byVal address          as longPtr, _
          byVal size             as longPtr, _
